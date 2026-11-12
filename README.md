@@ -12,7 +12,8 @@ Material del curso de **Visión Artificial** (CUTLAJO).
 sam3-dataset/
 ├── scripts/
 │   ├── descargar_pesos_sam3.py     # baja y verifica los pesos
-│   └── sam3_recortar_dataset.py    # segmenta y recorta
+│   ├── sam3_recortar_dataset.py    # segmenta y recorta
+│   └── empaquetar_roboflow.py      # convierte la salida en zips para Roboflow / YOLO
 ├── pesos/                          # sam3.pt va aquí (ignorado por git)
 ├── datos/
 │   ├── raw/                        # imágenes de entrada (ignorado)
@@ -103,7 +104,7 @@ datos/salida/v1/
 ├── metadatos.csv         # score, caja, área y similitud de cada recorte
 ├── mosaico_casco.jpg     # hoja de contacto para revisar de un vistazo
 ├── resumen.json          # parámetros usados en la corrida
-└── yolo/                 # solo con --exportar-yolo
+└── yolo/                 # solo con --exportar-yolo (polígonos de segmentación, sin dividir)
     ├── images/
     ├── labels/
     └── data.yaml
@@ -112,6 +113,54 @@ datos/salida/v1/
 Revisa siempre los mosaicos antes de entrenar. SAM 3 etiqueta muy bien, pero no
 distingue variantes específicas de un objeto, así que el filtro humano sigue
 siendo parte del proceso.
+
+## Empaquetar para Roboflow (detección con cajas)
+
+`--exportar-yolo` deja polígonos de **segmentación** en una sola carpeta. Para
+un proyecto de **Object Detection** en Roboflow o con `ultralytics`, convierte
+la corrida a cajas, divídela en train/valid/test y empaquétala en zip:
+
+```bash
+python scripts/empaquetar_roboflow.py datos/salida/v1 \
+    --score-min 0.3 --muestras 150 500 --sin-detectar --vista-previa
+```
+
+Lee `metadatos.csv` y `resumen.json`, así que no repites clases ni rutas (si
+moviste las imágenes originales, indícalas con `--entrada`). Además:
+
+- Quita **fragmentos**: cajas que caen casi completas (`--contenida 0.8`)
+  dentro de otra mayor de la misma clase, típicas cuando una máscara sale en
+  varios pedazos.
+- Convierte BMP/TIFF/WebP a JPG y aplica la rotación EXIF, para que las cajas
+  coincidan con la imagen que ve Roboflow.
+- Divide 70/20/10 por defecto (`--division 0.8 0.1 0.1` para cambiarlo).
+
+```
+datos/salida/v1/roboflow/
+├── v1_yolo.zip                  # todo: train/ valid/ test/ + data.yaml
+├── v1_muestra150_yolo.zip       # con --muestras: imágenes de score alto
+├── v1_muestra500_yolo.zip
+├── sin_detectar.zip             # con --sin-detectar: para etiquetar a mano
+├── revisar_confianza_baja.csv   # imágenes con alguna caja de score < 0.5
+├── vista_previa_cajas.jpg       # con --vista-previa
+└── resumen_empaquetado.json
+```
+
+**Subir a Roboflow:** Create New Project → Object Detection → Upload → arrastra
+el zip **sin descomprimir**. Roboflow lee el `data.yaml`, carga las cajas y
+conserva la división. Revisa las imágenes de `revisar_confianza_baja.csv` en el
+anotador antes de generar la versión.
+
+**Entrenar directo con ultralytics:** descomprime el zip y cambia el
+`data.yaml` a rutas absolutas:
+
+```yaml
+path: /ruta/a/v1_yolo
+train: train/images
+val: valid/images
+test: test/images
+names: ['casco', 'chaleco']   # respeta el orden original
+```
 
 ## Licencia
 
